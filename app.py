@@ -205,3 +205,4 @@ def api_add_member(member: MemberCreate):
 def api_delete_member(member_id: str):
     delete_member(member_id)
     return {"status": "deleted"}
+
