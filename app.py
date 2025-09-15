@@ -167,13 +167,13 @@ if __name__ == "__main__":
         basic_info={"city": "Bellevue"}
     )
 
-if result:
-    member_id, member_name, level_id, status_id = result
-    print("Created:", member_id, member_name, level_id, status_id)
-    # Test donation (replace with a real UUID from your members table)
-    # offering = add_offering("8bc9f775-a66a-47ea-bfdf-13fa3373a125", 1000, "測試奉獻")
-    # print("Added offering:", offering)
-    # print("Offerings:", get_offerings_for_member("8bc9f775-a66a-47ea-bfdf-13fa3373a125"))
+    if result:
+        member_id, member_name, level_id, status_id = result
+        print("Created:", member_id, member_name, level_id, status_id)
+        # Test donation (replace with a real UUID from your members table)
+        # offering = add_offering("8bc9f775-a66a-47ea-bfdf-13fa3373a125", 1000, "測試奉獻")
+        # print("Added offering:", offering)
+        # print("Offerings:", get_offerings_for_member("8bc9f775-a66a-47ea-bfdf-13fa3373a125"))
 
 # ---- Request body schema for creating a member ----
 
