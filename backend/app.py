@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 from datetime import date
 from psycopg2.extras import Json
-
+# test change
 # Load environment variables from .env file
 load_dotenv()
 app = FastAPI()
@@ -205,4 +205,3 @@ def api_add_member(member: MemberCreate):
 def api_delete_member(member_id: str):
     delete_member(member_id)
     return {"status": "deleted"}
-
