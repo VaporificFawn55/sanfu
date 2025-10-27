@@ -1,207 +1,154 @@
-import os
-import psycopg2
-from dotenv import load_dotenv
-from fastapi import FastAPI
-from pydantic import BaseModel
-from datetime import date
-from psycopg2.extras import Json
-# test chan
-# Load environment variables from .env file
-load_dotenv()
-app = FastAPI()
+from typing import Optional, Union, List
+from datetime import datetime
 
-DATABASE_URL = os.getenv("DATABASE_URL")
+from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
 
+from db import (
+    get_all_members,
+    search_members_by_name,
+    get_member_id_by_name,
+    create_member,
+    delete_member,
+    add_offering,
+    get_offerings_for_member,
+)
 
-def get_connection():
-    return psycopg2.connect(DATABASE_URL)
+app = FastAPI(title="Members API", version="1.0.0")
 
+# CORS – open for dev; in prod, set your frontend origin(s)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # e.g., ["https://your-frontend.app"]
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-def get_all_members():
-    conn = get_connection()
-    cur = conn.cursor()
-    cur.execute("SELECT id, name FROM members ORDER BY created_at;")
-    rows = cur.fetchall()
-    cur.close()
-    conn.close()
-    return rows
-
-
-def get_member_id_by_name(name):
-    conn = get_connection()
-    cur = conn.cursor()
-    cur.execute("SELECT id FROM members WHERE name = %s", (name,))
-    row = cur.fetchone()
-    cur.close()
-    conn.close()
-    return row[0] if row else None
-
-
-def add_offering(member_id, amount, note=""):
-    conn = get_connection()
-    cur = conn.cursor()
-    cur.execute(
-        """
-        INSERT INTO offerings (member_id, amount, note)
-        VALUES (%s, %s, %s)
-        RETURNING id, donated_at;
-        """,
-        (member_id, amount, note)
-    )
-    offering = cur.fetchone()
-    conn.commit()
-    cur.close()
-    conn.close()
-    return offering
-
-# Example: get donation log
-
-
-def get_offerings_for_member(member_id):
-    conn = get_connection()
-    cur = conn.cursor()
-    cur.execute(
-        """
-        SELECT id, amount, currency, donated_at, note
-        FROM offerings
-        WHERE member_id = %s
-        ORDER BY donated_at DESC;
-        """,
-        (member_id,)
-    )
-    rows = cur.fetchall()
-    cur.close()
-    conn.close()
-    return rows
-
-
-def delete_member(member_id: str):
-    conn = get_connection()
-    cur = conn.cursor()
-    try:
-        # Delete related offerings first
-        cur.execute("DELETE FROM offerings WHERE member_id = %s", (member_id,))
-
-        # Then delete the member
-        cur.execute("DELETE FROM members WHERE id = %s", (member_id,))
-
-        conn.commit()
-    except Exception as e:
-        conn.rollback()
-        print("Error deleting member:", e)
-    finally:
-        cur.close()
-        conn.close()
-        print("delete done")
-
-
-def create_member(name: str,
-                  level_code: str,
-                  status_code: str,
-                  *,
-                  gender: str | None = None,
-                  birthdate: date | None = None,
-                  phone: str | None = None,
-                  email: str | None = None,
-                  basic_info: dict | None = None):
-    """
-    Insert a member using codes from the lookup tables.
-    Returns tuple: (id, name, membership_level_id, interview_status_id)
-    """
-
-    conn = get_connection()
-    cur = conn.cursor()
-    try:
-        # --- Resolve membership level code -> id
-        cur.execute(
-            "SELECT id FROM membership_levels WHERE code = %s", (level_code,))
-        row = cur.fetchone()
-        if not row:
-            raise ValueError(f"Unknown membership level code: {level_code!r}")
-        membership_level_id = row[0]
-
-        # --- Resolve interview status code -> id
-        cur.execute(
-            "SELECT id FROM interview_statuses WHERE code = %s", (status_code,))
-        row = cur.fetchone()
-        if not row:
-            raise ValueError(f"Unknown interview status code: {status_code!r}")
-        interview_status_id = row[0]
-
-        # --- Insert member
-        cur.execute(
-            """
-            INSERT INTO members
-              (name, membership_level_id, interview_status_id, gender, birthdate, phone, email, basic_info)
-            VALUES
-              (%s,   %s,                   %s,                  %s,     %s,        %s,    %s,    %s)
-            RETURNING id, name, membership_level_id, interview_status_id;
-            """,
-            (name, membership_level_id, interview_status_id, gender, birthdate, phone,
-             email, psycopg2.extras.Json(basic_info) if basic_info is not None else None)
-        )
-        new_member = cur.fetchone()  # (id, name, membership_level_id, interview_status_id)
-        conn.commit()
-        return new_member
-
-    except Exception as e:
-        conn.rollback()
-        print("Error creating member:", e)
-        return None
-    finally:
-        cur.close()
-        conn.close()
-
-
-if __name__ == "__main__":
-    print("Members:", get_all_members())  # testing get all
-    print("ID: ", get_member_id_by_name("王小明"))  # testing search funciton
-    # delete_member("8552b3f4-c2fd-4af4-b7c9-cd9fb197c079") # testing delete which will
-    # testing the create
-    result = create_member(
-        name="王明",
-        level_code="participant",
-        status_code="undecided",
-        gender="M",
-        phone="555-1234",
-        basic_info={"city": "Bellevue"}
-    )
-
-    if result:
-        member_id, member_name, level_id, status_id = result
-        print("Created:", member_id, member_name, level_id, status_id)
-        # Test donation (replace with a real UUID from your members table)
-        # offering = add_offering("8bc9f775-a66a-47ea-bfdf-13fa3373a125", 1000, "測試奉獻")
-        # print("Added offering:", offering)
-        # print("Offerings:", get_offerings_for_member("8bc9f775-a66a-47ea-bfdf-13fa3373a125"))
-
-# ---- Request body schema for creating a member ----
+# ---------- Schemas ----------
 
 
 class MemberCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=100)
+    # Accept either ID (int) or code (str) or None
+    membership_level: Optional[Union[int, str]] = Field(
+        None, description="membership_levels.id or membership_levels.code"
+    )
+    interview_status: Optional[Union[int, str]] = Field(
+        None, description="interview_statuses.id or interview_statuses.code"
+    )
+    gender: Optional[str] = None
+    birthdate: Optional[datetime] = None  # or date if you prefer just dates
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    basic_info: Optional[dict] = None
+
+
+class MemberOut(BaseModel):
+    id: str
     name: str
-    membership_level: str
-    interview_status: str
-
-# ---- API endpoints ----
 
 
-@app.get("/members")
+class OfferingCreate(BaseModel):
+    member_id: str
+    amount: float = Field(..., ge=0)
+    note: Optional[str] = ""
+    donated_at: Optional[datetime] = None
+
+
+class OfferingOut(BaseModel):
+    id: int
+    amount: float
+    currency: str
+    donated_at: datetime
+    note: Optional[str] = None
+
+
+class OfferingLogOut(BaseModel):
+    member_id: str
+    total: float
+    log: List[OfferingOut]
+
+
+# ---------- Endpoints ----------
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+
+@app.get("/members", response_model=List[MemberOut])
 def api_get_members():
     return get_all_members()
 
 
+@app.get("/members/search", response_model=List[MemberOut])
+def api_search_members(name: str = Query(..., min_length=1)):
+    return search_members_by_name(name)
+
+
 @app.get("/members/by-name/{name}")
 def api_get_member_id(name: str):
-    return {"id": get_member_id_by_name(name)}
+    member_id = get_member_id_by_name(name)
+    if not member_id:
+        raise HTTPException(status_code=404, detail="Member not found")
+    return {"id": member_id}
 
 
-@app.post("/members")
+@app.post("/members", response_model=MemberOut, status_code=201)
 def api_add_member(member: MemberCreate):
-    return create_member(member.name, member.membership_level, member.interview_status)
+    try:
+        created = create_member(
+            name=member.name,
+            membership_level=member.membership_level,
+            interview_status=member.interview_status,
+            gender=member.gender,
+            birthdate=member.birthdate.date() if isinstance(
+                member.birthdate, datetime) else member.birthdate,
+            phone=member.phone,
+            email=member.email,
+            basic_info=member.basic_info,
+        )
+        return created
+    except ValueError as ve:
+        # unknown codes, etc.
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Failed to create member")
 
 
-@app.delete("/members/{member_id}")
-def api_delete_member(member_id: str):
-    delete_member(member_id)
-    return {"status": "deleted"}
+@app.delete("/members/{member_id}", status_code=204)
+def api_delete_member_ep(member_id: str):
+    try:
+        deleted = delete_member(member_id)
+        if deleted == 0:
+            raise HTTPException(status_code=404, detail="Member not found")
+        return  # 204 No Content
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to delete member")
+
+
+# ---------- offerings ----------
+@app.post("/offerings", response_model=OfferingOut, status_code=201)
+def api_add_offering(body: OfferingCreate):
+    try:
+        created = add_offering(
+            member_id=body.member_id,
+            amount=body.amount,
+            note=body.note or "",
+            donated_at=body.donated_at,
+        )
+        return created
+    except Exception:
+        raise HTTPException(status_code=400, detail="Failed to add offering")
+
+
+@app.get("/members/{member_id}/offerings", response_model=OfferingLogOut)
+def api_member_offerings(member_id: str):
+    try:
+        return get_offerings_for_member(member_id)
+    except Exception:
+        raise HTTPException(
+            status_code=400, detail="Failed to fetch offerings")
